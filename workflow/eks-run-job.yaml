@@ -1,0 +1,45 @@
+---
+name: EKS Run Job
+on:
+  workflow_dispatch:
+    inputs:
+      command:
+        description: 'Command to run in the job'
+        required: true
+
+jobs:
+  run-job:
+    timeout-minutes: 60
+    permissions:
+      id-token: write # configur-aws-credentials
+      contents: read # checkout
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29 # v4.1.6
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
+        with:
+          aws-region: ap-northeast-1
+          role-session-name: GitHubActions-${{ github.run_id }}
+          role-to-assume: <Role ARN>
+      - name: Check Image is built
+        run: |
+          aws ecr list-images --registry-id <ecr-registry-id> --repository-name <ecr-registry-name> | grep ${{ github.sha }}
+      - name: Update kube config
+        run: aws eks update-kubeconfig --name <eks-cluster-name> --region ap-northeast-1
+      - name: Install kube-job
+        run: |
+          wget https://github.com/h3poteto/kube-job/releases/download/v${{ env.KUBE_JOB_VERSION }}/kube-job_v${{ env.KUBE_JOB_VERSION }}_linux_amd64.zip
+          unzip kube-job_v${{ env.KUBE_JOB_VERSION }}_linux_amd64.zip
+        env:
+          KUBE_JOB_VERSION: 0.14.0
+      - name: Create Job
+        run: |
+          ./kube-job run --config="${HOME}/.kube/config" \
+            --template-file=./job_template_file.yaml \
+            --args="${{ inputs.command }}" \
+            --container=<container-name> \
+            --image=<aws-account-id>.dkr.ecr.ap-northeast-1.amazonaws.com/<ecr-registry-name>:${{ github.sha }} \
+            --timeout=3600 \
+            --cleanup "succeeded"
